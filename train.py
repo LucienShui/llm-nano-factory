@@ -11,7 +11,9 @@ import torch
 @dataclass
 class Arguments:
     model_name_or_path: str = field(metadata={"help": "Pretrained model name or path"})
-    task_type: str = field(metadata={"help": "Task type", "choices": ["pretrain", "sft"]})
+    task_type: str = field(metadata={"help": "Task type", "choices": ["sft"]})
+    max_seq_length: str = field(metadata={"help": "Max sequence length"})
+    train_file: str = field(metadata={"help": "Train file"})
 
 
 class Dataset(TorchDataset):
@@ -29,9 +31,8 @@ class Dataset(TorchDataset):
         data = json.loads(str_data)
         messages = data["messages"]
 
-        assert len(messages) > 0
-        assert len(messages) % 2 == int(messages[0]['role'] == 'system')
-        assert messages[-1]['role'] == 'assistant'
+        assert len(messages) > 0 and len(messages) % 2 == int(messages[0]['role'] == 'system') \
+               and messages[-1]['role'] == 'assistant'
 
         encoded_ids = []
         target_mask = []
@@ -43,31 +44,31 @@ class Dataset(TorchDataset):
             previous_length = len(encoded_ids)
             encoded_ids = self.tokenizer.apply_chat_template(messages[:i], tokenize=True, add_generation_prompt=is_user)
 
-            target_mask += [int(is_user)] * (len(encoded_ids) - previous_length)
+            target_mask += [1 - int(is_user)] * (len(encoded_ids) - previous_length)
 
         assert len(target_mask) == len(encoded_ids)
-        return {'input_ids': encoded_ids, 'target_mask': target_mask}
+        return encoded_ids, target_mask
 
     def collator(self, batch: List[Dict[str, list]]) -> Dict[str, Any]:
-        length_list = list(map(lambda x: len(x["input_ids"]), batch))
-        max_length = min(max(length_list), self.max_seq_length)
+        length_list = list(map(lambda x: min(len(x[0]), self.max_seq_length), batch))
+        max_length = max(length_list)
 
-        b_input_ids, b_target_mask = [], []
+        b_input_ids, b_attn_mask, b_target_mask = [], [], []
 
-        for each in batch:
-            input_ids = each["input_ids"][:max_length]
-            padding_length = max_length - len(input_ids)
+        for (input_ids, target_mask), length in zip(batch, length_list):
+            padding_length = max_length - length
 
-            input_ids = input_ids + [self.tokenizer.pad_token_id] * padding_length
-            target_mask = each['target_mask'][:max_length] + [0] * padding_length
+            b_input_ids.append(input_ids[:length] + [self.tokenizer.pad_token_id] * padding_length)
+            b_attn_mask.append([1] * length + [0] * padding_length)
+            b_target_mask.append(target_mask[:length] + [0] * padding_length)
 
-            b_input_ids.append(input_ids)
-            b_target_mask.append(target_mask)
-
-        t_b_input_ids, t_b_target_mask = map(lambda x: torch.tensor(x, dtype=torch.long), (b_input_ids, b_target_mask))
+        t_b_input_ids, t_b_attn_mask, t_b_target_mask = map(
+            lambda x: torch.tensor(x, dtype=torch.long),
+            (b_input_ids, b_attn_mask, b_target_mask)
+        )
         return {
             "input_ids": t_b_input_ids,
-            "target_mask": t_b_target_mask,
+            "attention_mask": t_b_attn_mask,
             "labels": torch.where(t_b_target_mask == 1, t_b_input_ids, -100)
         }
 
@@ -105,9 +106,10 @@ def get_trainer(config_file_path: str):
 
 def main():
     trainer = get_trainer(get_args().config)
-    trainer.train()
+    train_result = trainer.train()
     trainer.save_model()
-    trainer.save_metrics()
+    trainer.log_metrics("train", train_result.metrics)
+    trainer.save_metrics("train", train_result.metrics)
     trainer.save_state()
 
 
