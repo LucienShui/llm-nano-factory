@@ -74,7 +74,7 @@ class Dataset(TorchDataset):
         return {
             "input_ids": t_b_input_ids,
             "attention_mask": t_b_attn_mask,
-            "labels": torch.where(t_b_target_mask == 1, t_b_input_ids, -100)
+            "labels": torch.where(t_b_target_mask == 1, t_b_input_ids, -100).long()
         }
 
 
