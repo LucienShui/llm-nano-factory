@@ -81,13 +81,15 @@ class Dataset(TorchDataset):
 def get_args() -> Namespace:
     parser = ArgumentParser()
     parser.add_argument("--config", type=str, required=True, help="Config file path")
+    parser.add_argument("--local_rank", type=int, help="Local rank", default=-1)
     args = parser.parse_args()
     return args
 
 
-def get_trainer(config_file_path: str):
+def get_trainer(config_file_path: str, local_rank: int):
     parser = HfArgumentParser((Arguments, TrainingArguments))
     args, train_args = parser.parse_json_file(config_file_path)
+    train_args.local_rank = local_rank
     set_seed(train_args.seed)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
@@ -129,7 +131,8 @@ def get_trainer(config_file_path: str):
 
 
 def main():
-    trainer = get_trainer(get_args().config)
+    args = get_args()
+    trainer = get_trainer(args.config, args.local_rank)
     train_result = trainer.train()
     trainer.save_model()
     trainer.log_metrics("train", train_result.metrics)
