@@ -12,7 +12,7 @@ import torch
 @dataclass
 class Arguments:
     model_name_or_path: str = field(metadata={"help": "Pretrained model name or path"})
-    task_type: str = field(metadata={"help": "Task type", "choices": ["sft"]})
+    stage: str = field(metadata={"help": "Training stage", "choices": ["sft"]})
     max_seq_length: str = field(metadata={"help": "Max sequence length"})
     train_file: str = field(metadata={"help": "Train file"})
     train_mode: str = field(metadata={"help": "Train mode", "choices": ["full", "lora"]})
@@ -113,7 +113,7 @@ def get_trainer(config_file_path: str):
         model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    if args.task_type == "pretrain":
+    if args.stage == "pretrain":
         dataset = Dataset(args.train_file, tokenizer, args.max_seq_length)
     else:
         dataset = Dataset(args.train_file, tokenizer, args.max_seq_length)

@@ -1,6 +1,6 @@
 {
     "model_name_or_path": "Qwen/Qwen1.5-0.5B-Chat",
-    "task_type": "sft",
+    "stage": "sft",
 
     "output_dir": "output",
     "train_file": "data.example.jsonl",
