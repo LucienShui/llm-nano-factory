@@ -1,9 +1,10 @@
 from argparse import ArgumentParser, Namespace
-from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedTokenizer, BitsAndBytesConfig
 from transformers import HfArgumentParser, TrainingArguments, set_seed, Trainer
 from dataclasses import dataclass, field
 from torch.utils.data import Dataset as TorchDataset
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 import json
 import torch
 
@@ -14,6 +15,10 @@ class Arguments:
     task_type: str = field(metadata={"help": "Task type", "choices": ["sft"]})
     max_seq_length: str = field(metadata={"help": "Max sequence length"})
     train_file: str = field(metadata={"help": "Train file"})
+    train_mode: str = field(metadata={"help": "Train mode", "choices": ["full", "lora"]})
+    lora_rank: int = field(metadata={"help": "Lora rank"}, default=8)
+    lora_target: str = field(metadata={"help": "Lora target"}, default="q_proj,v_proj")
+    quantization_bit: Optional[int] = field(metadata={"help": "Quantization bit", "choices": [4, 8]}, default=None)
 
 
 class Dataset(TorchDataset):
@@ -83,11 +88,30 @@ def get_args() -> Namespace:
 def get_trainer(config_file_path: str):
     parser = HfArgumentParser((Arguments, TrainingArguments))
     args, train_args = parser.parse_json_file(config_file_path)
+    set_seed(train_args.seed)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_name_or_path,
+        trust_remote_code=True,
+        load_in_4bit=args.quantization_bit == 4,
+        load_in_8bit=args.quantization_bit == 8
+    )
 
-    set_seed(train_args.seed)
+    if args.quantization_bit is not None:
+        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=train_args.gradient_checkpointing)
+
+    if args.train_mode != "full":
+        lora_config = LoraConfig(
+            r=args.lora_rank,
+            lora_alpha=args.lora_rank * 2,
+            target_modules=args.lora_target.split(","),
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM"
+        )
+        model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
 
     if args.task_type == "pretrain":
         dataset = Dataset(args.train_file, tokenizer, args.max_seq_length)
