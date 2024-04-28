@@ -74,7 +74,7 @@ class Dataset(TorchDataset):
         return {
             "input_ids": t_b_input_ids,
             "attention_mask": t_b_attn_mask,
-            "labels": torch.where(t_b_target_mask == 1, t_b_input_ids, -100).long()
+            "labels": torch.where(t_b_target_mask == 1, t_b_input_ids, -100)
         }
 
 
@@ -88,8 +88,10 @@ def get_args() -> Namespace:
 
 def get_trainer(config_file_path: str, local_rank: int):
     parser = HfArgumentParser((Arguments, TrainingArguments))
-    args, train_args = parser.parse_json_file(config_file_path)
-    train_args.local_rank = local_rank
+    with open(config_file_path, encoding="utf-8") as f:
+        config = json.load(f)
+    config['local_rank'] = local_rank
+    args, train_args = parser.parse_dict(config)
     set_seed(train_args.seed)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
